@@ -8,6 +8,7 @@ from matplotlib.colors import ListedColormap, BoundaryNorm
 import rasterio
 from rasterio.windows import Window
 from rasterio.warp import reproject, Resampling
+from skimage.transform import resize as sk_resize
 
 from sklearn.cluster import KMeans, MiniBatchKMeans, AgglomerativeClustering, SpectralClustering
 from sklearn.mixture import GaussianMixture
@@ -292,6 +293,10 @@ def main():
         # Adjust geographic trasnform matrix according to step
         preview_transform = original_transform * original_transform.scale(step, step)
 
+        # Ground size of one preview pixel, in map units (metres for a UTM CRS).
+        # Used by the A* planner to convert DEM gradients into real slopes.
+        pixel_size_m = abs(original_transform.a) * step
+
     with rasterio.open(path_dem) as dem_src:
 
         # Target array with previous configuration
@@ -325,7 +330,14 @@ def main():
             final_map, filename = run_prediction_memmap(name, model_obj, scaler, mapping, paths, h_min, w_min)
         
         preview_map = np.array(final_map[::step, ::step])
-        
+
+        # DEM resampled to exactly the preview grid so the A* planner can read
+        # a slope value for every map pixel.
+        dem_for_planning = sk_resize(
+            np.asarray(dem_aligned, dtype=np.float32),
+            preview_map.shape, order=1, preserve_range=True
+        ).astype(np.float32)
+
 
         # =========================================================================
         #  Path planning by supplement type ----- CHANGE HERE!!
@@ -345,7 +357,9 @@ def main():
                 preview_map=preview_map,
                 suplement=args.suplement,
                 spacing_px=4.0,
-                use_elevation=args.use_elevation # Deciding if it uses A* or not
+                use_elevation=args.use_elevation, # Deciding if it uses A* or not
+                dem=dem_for_planning,             # slope-aware A* obstacle avoidance
+                pixel_size_m=pixel_size_m
             )
             
             filename_mission = f"final_path_{args.suplement}_{name.replace(' ', '_')}.png"
