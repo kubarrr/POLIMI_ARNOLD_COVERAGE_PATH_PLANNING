@@ -204,8 +204,8 @@ def main():
                         choices=['kmeans', 'mbkmeans', 'agglomerative', 'spectral', 'fcm', 'gmm', 'all'],
                         help="Chose clustering algorith (Default: kmeans)")
     parser.add_argument('--k', type=int, default=3, help="Zone number (Default: 3)")
-    parser.add_argument('--high-quality', action='store_true', 
-                        help="High quality RAM processing.")
+    parser.add_argument('--high-quality', '--high-resolution', action='store_true', dest='high_quality',
+                        help="High quality full-resolution RAM processing (alias: --high-resolution).")
     parser.add_argument('--config', type=str, default='paths.txt',
                         help="Txt file with paths for orthometry and DEM (Default: paths.txt)")
     parser.add_argument('--suplement', type=str, default='water', choices=['water', 'nitrogen'],

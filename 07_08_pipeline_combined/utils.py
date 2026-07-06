@@ -27,12 +27,12 @@ def load_paths_from_txt(txt_path):
                 lines.append(line_clean)
 
                 
-    if len(lines) < 6:
-        raise ValueError(f"File'{txt_path}' must contain 6 paths (5 spectral + 1 DEM)!")
-        
+    if len(lines) < 7:
+        raise ValueError(f"File '{txt_path}' must contain 7 paths (5 spectral + 1 DEM + 1 shape)!")
+
     paths = lines[:5]       # spectral bands
     path_dem = lines[5]     # dem path
-    path_shape = lines[6]
+    path_shape = lines[6]   # vineyard boundary shapefile
     
     return paths, path_dem, path_shape
 
