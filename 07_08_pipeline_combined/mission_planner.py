@@ -2,7 +2,8 @@ import heapq
 import math
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.ndimage import binary_closing, binary_fill_holes, binary_dilation
+from scipy.ndimage import (binary_closing, binary_fill_holes, binary_dilation,
+                           gaussian_filter)
 
 
 # =====================================================================
@@ -36,11 +37,27 @@ def target_mask(preview_map, suplement):
 #  Cost grid for the A* planner  (now slope/DEM aware)
 # =====================================================================
 
-def slope_degrees(dem, pixel_size_m=1.0):
-    """Terrain slope in degrees from a DEM, using the local gradient."""
+def slope_degrees(dem, pixel_size_m=1.0, smooth_m=2.0):
+    """
+    Terrain slope in degrees from a DEM.
+
+    The DEM is first smoothed over a ~`smooth_m` metre baseline, ignoring NoData
+    (values <= 0). Without this, a per-pixel gradient on a centimetre-resolution
+    DEM is dominated by elevation noise and NoData cliffs, producing meaningless
+    slopes of tens of degrees. Smoothing recovers the true, broad-scale terrain
+    slope.
+    """
     dem = np.asarray(dem, dtype=np.float32)
+    valid = dem > 0
+    if smooth_m and smooth_m > 0:
+        sigma = max(1.0, smooth_m / max(pixel_size_m, 1e-6))
+        num = gaussian_filter(np.where(valid, dem, 0.0), sigma)
+        den = gaussian_filter(valid.astype(np.float32), sigma)
+        dem = num / np.maximum(den, 1e-6)
     gy, gx = np.gradient(dem, float(max(pixel_size_m, 1e-6)))
-    return np.degrees(np.arctan(np.hypot(gx, gy)))
+    slope = np.degrees(np.arctan(np.hypot(gx, gy)))
+    slope[~valid] = 0.0
+    return slope
 
 
 def create_corridor_cost_grid(preview_map, suplement="water",
