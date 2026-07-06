@@ -1,6 +1,9 @@
 # --- Large input data (never commit, hundreds of MB each) ---
 data/
+data2/
 SHAPE/
+20240528_orthomosaic/
+*_orthomosaic/
 *.tif
 *.tiff
 
@@ -14,6 +17,13 @@ __pycache__/
 *.dat
 07_08_pipeline_combined/final_path_*.png
 07_08_pipeline_combined/temp_*.dat
+
+# --- Regenerable report artifacts (the executed .ipynb is committed instead) ---
+07_08_pipeline_combined/cache/
+07_08_pipeline_combined/compare/
+07_08_pipeline_combined/figures/
+07_08_pipeline_combined/paths_data2.txt
+data2/derived/
 
 # --- OS / editor cruft ---
 .DS_Store

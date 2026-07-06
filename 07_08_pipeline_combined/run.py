@@ -43,10 +43,10 @@ def main():
     subprocess.check_call([py, "-m", "pip", "install", "-r",
                            os.path.join(HERE, "requirements.txt"), "-q"])
 
-    # 3. Run the pipeline inside the venv, forwarding all arguments.
+    # 3. Run the end-to-end pipeline inside the venv, forwarding all arguments.
     print("Initiate pipeline:")
     print("----------------------------------------------------")
-    cmd = [py, os.path.join(HERE, "pipeline.py")] + sys.argv[1:]
+    cmd = [py, os.path.join(HERE, "run_pipeline.py")] + sys.argv[1:]
     raise SystemExit(subprocess.call(cmd))
 
 
