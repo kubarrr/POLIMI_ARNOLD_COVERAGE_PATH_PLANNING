@@ -1,0 +1,21 @@
+# --- Large input data (never commit, hundreds of MB each) ---
+data/
+SHAPE/
+*.tif
+*.tiff
+
+# --- Python virtual environment ---
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# --- Pipeline temporary / output artifacts ---
+*.dat
+07_08_pipeline_combined/final_path_*.png
+07_08_pipeline_combined/temp_*.dat
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+.ipynb_checkpoints/
