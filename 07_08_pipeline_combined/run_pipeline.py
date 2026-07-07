@@ -92,8 +92,13 @@ def load_features(paths, step, zone_smooth_m):
 
     feats = np.column_stack([sm(x)[veg] for x in (ndre, ndvi, nir, r, nir)])
     X = MinMaxScaler().fit_transform(feats)
+    # unsmoothed per-pixel features -> the "raw" (pre-fix) zoning, kept only so
+    # the report can show the old speckled result next to the final contiguous one
+    feats_raw = np.column_stack([x[veg] for x in (ndre, ndvi, nir, r, nir)])
+    X_raw = MinMaxScaler().fit_transform(feats_raw)
     return dict(oh=oh, ow=ow, veg=veg, ndre=ndre, ndvi=ndvi, nir=nir, r=r, g=g,
-                feats=feats, X=X, pixel_size_m=pixel_size_m)
+                feats=feats, X=X, feats_raw=feats_raw, X_raw=X_raw,
+                pixel_size_m=pixel_size_m)
 
 
 def cluster_labels(method, X, k, seed=123):
@@ -210,6 +215,15 @@ def main():
         primary = next(iter(zmaps))
     preview_map = zmaps[primary]
 
+    # raw (unsmoothed, per-pixel) zoning for the primary method -> old-vs-final view
+    try:
+        raw_labels = cluster_labels(primary, feat["X_raw"], k)
+        raw_mapping = sort_labels_by_ndre(raw_labels, feat["feats_raw"])
+        preview_map_raw = np.zeros((feat["oh"], feat["ow"]), dtype=np.uint8)
+        preview_map_raw[feat["veg"]] = np.array([raw_mapping[l] for l in raw_labels], dtype=np.uint8)
+    except Exception:
+        preview_map_raw = preview_map
+
     # --- 3. DEM + coverage path planning (water & nitrogen) ---
     print(f"[3/4] Path planning ...")
     dem_preview = align_dem(path_dem, paths[0], feat["oh"], feat["ow"], preview_map.shape, step)
@@ -226,6 +240,7 @@ def main():
     # --- 4. persist everything the notebook needs ---
     print(f"[4/4] Saving outputs ...")
     np.save(os.path.join(cache, "preview_map.npy"), preview_map)
+    np.save(os.path.join(cache, "preview_map_raw.npy"), preview_map_raw)
     np.save(os.path.join(cache, "ndre_preview.npy"), feat["ndre"].astype(np.float32))
     np.save(os.path.join(cache, "ndvi_preview.npy"), feat["ndvi"].astype(np.float32))
     np.save(os.path.join(cache, "false_colour.npy"), false_colour(feat))

@@ -25,7 +25,8 @@ from sklearn.metrics import (silhouette_score, davies_bouldin_score,
 from IPython.display import display
 
 from mission_planner import (field_mask, target_mask, _sweep_segments,
-                             order_swaths_snake, generate_zone_swaths, slope_degrees)
+                             order_swaths_snake, generate_zone_swaths, slope_degrees,
+                             generate_autonomous_mission)
 
 plt.rcParams.update({"figure.dpi": 110, "axes.titlesize": 12, "font.size": 10})
 CACHE, COMPARE, FIG = "cache", "compare", "figures"
@@ -71,6 +72,7 @@ def load_ds(name):
           "veg": np.load(f"{c}/veg.npy"),
           "meta": np.load(f"{c}/meta.npz", allow_pickle=True)}
     ds["dem"] = np.load(f"{c}/dem_preview.npy") if os.path.exists(f"{c}/dem_preview.npy") else None
+    ds["raw"] = np.load(f"{c}/preview_map_raw.npy") if os.path.exists(f"{c}/preview_map_raw.npy") else None
     ds["px"] = float(ds["meta"]["pixel_size_m"])
     ds["K"] = int(ds["meta"]["k"])
     ds["method"] = str(ds["meta"]["method"])
@@ -205,6 +207,47 @@ def method_comparison(name):
     fig.tight_layout(); plt.show()
 
 
+def show_old_vs_final(ds):
+    """Old approach (per-pixel clustering, speckle) vs final (smoothed, contiguous)."""
+    if ds["raw"] is None:
+        return
+    K = ds["K"]
+    cmap = ListedColormap(ZONE_COLORS[:K + 1]); norm = BoundaryNorm(np.arange(K + 2) - 0.5, K + 1)
+    fig, ax = plt.subplots(1, 2, figsize=(18, 7.5), constrained_layout=True)
+    ax[0].imshow(ds["raw"], cmap=cmap, norm=norm, interpolation="nearest")
+    ax[0].set_title("OLD: per-pixel clustering (speckle)")
+    ax[1].imshow(ds["zones"], cmap=cmap, norm=norm, interpolation="nearest")
+    ax[1].set_title("FINAL: smoothed contiguous management zones")
+    for a in ax:
+        a.legend(handles=zlegend(K), loc="upper right", framealpha=0.9, fontsize=8)
+        a.axis("off")
+    fig.savefig(f"{FIG}/{ds['name']}_old_vs_final.png", bbox_inches="tight"); plt.show()
+
+
+def show_missions_by_method(name, supp="nitrogen", color="#ff5ecb"):
+    """Final coverage path for `supp` under every clustering method."""
+    base = np.load(f"{CACHE}/{name}/false_colour.npy")
+    px = float(np.load(f"{CACHE}/{name}/meta.npz", allow_pickle=True)["pixel_size_m"])
+    files = sorted(glob.glob(f"{COMPARE}/{name}/zones_*.npy"))
+    cols = 3; rows = int(np.ceil(len(files) / cols))
+    fig, ax = plt.subplots(rows, cols, figsize=(5 * cols, 4 * rows))
+    axes = np.array(ax).ravel()
+    for a, f in zip(axes, files):
+        method = os.path.basename(f)[6:-4].replace("_", " ")
+        zmap = np.load(f)
+        traj = generate_autonomous_mission(zmap, supp, 4.0, use_elevation=False)
+        length = sum(np.hypot(x2 - x1, y2 - y1) for (x1, y1), (x2, y2) in traj) * px
+        a.imshow(base * 0.4 + 0.05)
+        for (x1, y1), (x2, y2) in traj:
+            a.plot([x1, x2], [y1, y2], color=color, lw=0.7, alpha=0.9)
+        a.set_title(f"{method}\n{len(traj)} seg, ~{length:.0f} m"); a.axis("off")
+    for a in axes[len(files):]:
+        a.axis("off")
+    fig.suptitle(f"Final {supp.upper()} coverage path by clustering method — {name}", fontsize=13)
+    fig.tight_layout()
+    fig.savefig(f"{FIG}/{name}_missions_by_method.png", bbox_inches="tight"); plt.show()
+
+
 # %% [markdown]
 # ---
 # # PART A — Dataset `data` (multispectral + DEM)
@@ -218,6 +261,15 @@ def method_comparison(name):
 # %%
 d1 = load_ds("data")
 show_zones(d1)
+
+# %% [markdown]
+# ## A1b. Old vs final zones — the improvement
+# **Left:** the original per-pixel clustering (speckle; with sparse training K=3
+# could even collapse the high-vigor zone to empty). **Right:** the final smoothed,
+# contiguous management zones the planner actually uses.
+
+# %%
+show_old_vs_final(d1)
 
 # %% [markdown]
 # ## A2. Per-zone statistics — mean NDRE rises with the zone number (correct ordering)
@@ -271,6 +323,15 @@ show_mission(d1, "nitrogen", "#ff5ecb")
 method_comparison("data")
 
 # %% [markdown]
+# ## A8. Final coverage path per clustering method (NITROGEN)
+# Water coverage is method-independent (it targets every vine zone), so the
+# nitrogen mission is shown — it changes with the method because each one draws
+# the highest-vigor zone (which nitrogen skips) differently.
+
+# %%
+show_missions_by_method("data", "nitrogen")
+
+# %% [markdown]
 # ---
 # # PART B — Dataset `data2` (OpenDroneMap orthophoto, no DEM)
 # Same flow via the ODM adapter; the slope / A\* elevation stage is skipped.
@@ -281,6 +342,12 @@ method_comparison("data")
 # %%
 d2 = load_ds("data2")
 show_zones(d2)
+
+# %% [markdown]
+# ## B1b. Old vs final zones
+
+# %%
+show_old_vs_final(d2)
 
 # %% [markdown]
 # ## B2. Per-zone statistics
@@ -311,6 +378,12 @@ show_mission(d2, "nitrogen", "#ff5ecb")
 
 # %%
 method_comparison("data2")
+
+# %% [markdown]
+# ## B7. Final coverage path per clustering method (NITROGEN)
+
+# %%
+show_missions_by_method("data2", "nitrogen")
 
 # %% [markdown]
 # ---
