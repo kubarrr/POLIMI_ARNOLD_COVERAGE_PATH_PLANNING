@@ -7,12 +7,14 @@ FILES
 run_pipeline.py   End-to-end flow (clustering -> zones -> coverage paths) that
                   writes raw outputs to cache/<name>/ and compare/<name>/.
                   This is the entry point used by the report notebook.
+run_pipeline_with_saved_figures.py
+                  Same run, but also renders the report figures to PNG files in
+                  figures/<name>/ (no notebook needed).
 report.ipynb      Report notebook: runs run_pipeline with flags, then visualises
                   and aggregates the results (all reporting code lives here).
 prepare_odm.py    Adapter: split an OpenDroneMap multispectral orthophoto into
                   the NIR/RE/R/G/NDVI band rasters the flow expects.
-pipeline.py       The colleague's original combined pipeline, kept unchanged.
-mission_planner.py / processing.py / utils.py   Building blocks.
+mission_planner.py / processing.py / utils.py   Building blocks (imported by the flow).
 run.py / run.bat  Cross-platform launcher: make a venv, install deps, run the flow.
 
 
