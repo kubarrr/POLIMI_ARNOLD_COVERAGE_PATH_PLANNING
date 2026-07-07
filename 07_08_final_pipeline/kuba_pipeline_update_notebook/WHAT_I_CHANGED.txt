@@ -4,47 +4,26 @@ here's a rundown of what was there from Ana and what I changed / added. I kept
 Ana's original pipeline.py exactly as it was (it's in ana_pipeline_preparation/),
 and put my end-to-end version in run_pipeline.py so nothing of hers got lost.
 
-WHERE I STARTED (Ana's part)
-----------------------------
-Ana had the clustering side working (6 methods + CaSP) and had written the first
-path-planning layer in mission_planner.py: the two algorithms, the water/nitrogen
-logic (water = all vine zones, nitrogen = skip the highest-vigor zone), and an A*
-for obstacle avoidance. She flagged a few things that didn't work yet: the path
-ran over the vines, the A* was off on the low-res map, the row-angle detection
-didn't work, and there was no Windows venv script. So I started from that.
+WHAT I FIXED vs ANA'S PIPELINE
+------------------------------
+Ana had clustering (6 methods + CaSP) + the first path-planning layer
+(mission_planner.py: the two algorithms, the water/nitrogen logic, an A*). She
+flagged: path ran over the vines, A* off on the low-res map, row-angle detection
+broken, no Windows venv script. What I changed:
 
-WHAT I DID ("make it work")
----------------------------
-1. It runs end-to-end now on the real data, and produces the maps + missions.
-
-2. "Goes over the vineyards" -> fixed. The robot now drives on the bare-soil
-   corridors (zone 0) *next to* the zones that need treatment, instead of on top
-   of the vine rows. Same water/nitrogen logic you wrote, just moved onto the
-   corridors.
-
-3. The A* is a proper full A* now and it does run over the whole field (~25 s).
-   The real problem wasn't the downsampling of the map - it was the slope: a
-   pixel-by-pixel gradient on a centimetre DEM is pure noise (it said the flat
-   vineyard had ~28 deg median slope, 90 deg max). I smooth the DEM over ~2 m
-   first, and then the slope is realistic (~3 deg) and the A* connectors weave
-   through the corridors like they should.
-
-4. The clustering had two issues I had to fix to get good maps:
-   - The empty zone: with the sparse 15k-pixel training sample, K=3 collapsed and
-     the high-vigor zone came out basically empty. Training on the full (decimated)
-     vegetation instead gives 3 real, balanced zones.
-   - Speckle: the zones came out as per-pixel confetti, not real management areas.
-     Turns out CaSP does nothing here (its 5000-px island threshold is bigger than
-     any patch on this fine vineyard, so it just returns the raw map). I replaced
-     it by smoothing the vigor surface before clustering -> big contiguous zones,
-     while the soil stays drivable.
-
-5. The data is in degrees (EPSG:4326), which is why the pixel size / slope were
-   off. I compute the ground pixel size geodesically so it's correct.
-
-6. Windows script: done. run.py (and run.bat) is cross-platform - it makes the
-   venv, installs the requirements and runs the pipeline, on Windows/Linux/Mac.
-   --high-resolution and --use-elevation both work.
+- Runs end-to-end on the real data now.
+- Corridors, not vines: the robot drives on the bare-soil corridors next to the
+  target zones (same water/nitrogen logic, just moved off the rows).
+- A* fixed: it wasn't the downsampling - the slope was noise (a per-pixel gradient
+  on a cm DEM gave ~28 deg median / 90 deg max on flat ground). Smoothing the DEM
+  over ~2 m gives realistic slope (~3 deg), and A* runs over the whole field (~25 s).
+- Clustering: the sparse 15k sample collapsed K=3 (empty high-vigor zone) -> now
+  trained on the full vegetation; and CaSP was a no-op here (its 5000-px threshold
+  is bigger than any patch) -> replaced by smoothing before clustering, giving big
+  contiguous zones instead of per-pixel confetti (soil stays drivable).
+- Pixel size: data is in degrees (EPSG:4326), so I compute it geodesically.
+- Windows: run.py / run.bat make the venv, install deps and run, on any OS
+  (--high-resolution and --use-elevation both work).
 
 NEW STUFF I ADDED
 -----------------
