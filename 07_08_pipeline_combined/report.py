@@ -198,14 +198,18 @@ def show_stages(ds):
     ax[0, 0].set_facecolor("#0d0d0d")
     ax[0, 0].imshow(zov, cmap=cmap, norm=norm, interpolation="nearest")
     ax[0, 0].set_title("1. Management zones (clustering output)", fontsize=14)
+    ax[0, 0].legend(handles=zlegend(K), loc="upper right", framealpha=0.95, fontsize=9)
     ax[0, 1].imshow(tgt, cmap="Greens", interpolation="nearest")
-    ax[0, 1].set_title("2. Target mask — vine zones needing WATER (all of them)", fontsize=14)
+    ax[0, 1].set_title("2. Target mask — vine zones needing WATER (green = target)", fontsize=14)
     ax[1, 0].imshow(useful, cmap="Oranges", interpolation="nearest")
-    ax[1, 0].set_title("3. Drivable bare-soil corridors adjacent to the targets", fontsize=14)
+    ax[1, 0].set_title("3. Drivable bare-soil corridors near targets (orange = drivable)", fontsize=14)
     ax[1, 1].imshow(base * 0.6)
     for (x1, y1), (x2, y2) in sw:
         ax[1, 1].plot([x1, x2], [y1, y2], color="#00e5ff", lw=1.0, alpha=0.95)
-    ax[1, 1].set_title("4. Boustrophedon coverage swaths laid on the corridors", fontsize=14)
+    ax[1, 1].legend(handles=[Line2D([0], [0], color="#00e5ff", lw=2, label="Coverage swath")],
+                    loc="upper right", framealpha=0.95, fontsize=10)
+    ax[1, 1].set_title("4. Boustrophedon coverage swaths on the corridors "
+                       "(background = NIR-R-G false colour)", fontsize=13)
     for a in ax.ravel(): a.axis("off")
     fig.savefig(f"{FIG}/{ds['name']}_stages.png", dpi=120, bbox_inches="tight"); plt.show()
 
@@ -255,11 +259,16 @@ def method_comparison(name):
     cmap = ListedColormap(ZONE_COLORS[:K + 1]); norm = BoundaryNorm(np.arange(K + 2) - 0.5, K + 1)
     names = list(maps); cols = 3; rows = int(np.ceil(len(names) / cols))
     fig, ax = plt.subplots(rows, cols, figsize=(5 * cols, 4 * rows))
-    for a, mm in zip(np.array(ax).ravel(), names):
-        a.imshow(maps[mm], cmap=cmap, norm=norm); a.set_title(mm); a.axis("off")
-    for a in np.array(ax).ravel()[len(names):]: a.axis("off")
+    axes = np.array(ax).ravel()
+    for a, mm in zip(axes, names):
+        a.set_facecolor("#0d0d0d")
+        a.imshow(np.ma.masked_where(maps[mm] == 0, maps[mm]), cmap=cmap, norm=norm,
+                 interpolation="nearest")          # solid colours, sharp boundaries
+        a.set_title(mm); a.axis("off")
+    for a in axes[len(names):]: a.axis("off")
+    fig.legend(handles=zlegend(K), loc="lower center", ncol=K, framealpha=0.95, fontsize=10)
     fig.suptitle(f"Zone maps by clustering method — {name}", fontsize=13)
-    fig.tight_layout(); plt.show()
+    fig.tight_layout(rect=[0, 0.04, 1, 1]); plt.show()
 
 
 def show_old_vs_final(ds):
@@ -374,6 +383,13 @@ show_zones(d1)
 # **Left:** the original per-pixel clustering (speckle; with sparse training K=3
 # could even collapse the high-vigor zone to empty). **Right:** the final smoothed,
 # contiguous management zones the planner actually uses.
+#
+# *How the final zones are built:* for every band we spread the canopy values across
+# the inter-row gaps with a NaN-aware Gaussian filter (~2.5 m baseline), giving a
+# continuous vigor surface; K-Means is trained on that surface over the full
+# vegetation, and the resulting labels are sorted by mean NDRE so Zone 1 = lowest
+# vigor. Soil pixels stay 0. (Implemented in `run_pipeline.load_features` +
+# `build_zone_map`.)
 
 # %%
 show_old_vs_final(d1)
@@ -431,12 +447,26 @@ show_stages(d1)
 
 # %% [markdown]
 # ## A5. Coverage path — WATER (treats every vine zone)
+# *"Treats every vine zone"* means the target is **all** canopy pixels, i.e.
+# `preview_map >= 1` (every vigor level), because irrigation is applied to the
+# whole vineyard. The planner then lays swaths on the soil corridors next to that
+# target and chains them into the route below. (`target_mask(zones, "water")`.)
 
 # %%
 show_mission(d1, "water", "#00e5ff")
 
 # %% [markdown]
 # ## A6. Coverage path — NITROGEN (skips the highest-vigor zone)
+# Target = `1 <= preview_map < max_zone`, i.e. only the low/medium-vigor canopy;
+# the highest-vigor zone is dropped (already vigorous → no extra nitrogen). Fewer
+# target pixels → a smaller mission than water. (`target_mask(zones, "nitrogen")`.)
+#
+# *On the path shape:* the swaths are horizontal sweeps over the (fragmented) soil
+# corridors, chained by a nearest-neighbour "snake". This covers the field but
+# looks jagged, and a few long straight **connectors** can cut across / outside the
+# field — those are transition links, not coverage. With `--use-elevation` the
+# connectors are routed by A* through the corridors instead (Section A6b). Cleaner
+# straight rows would require sweeping along the true row angle (a possible next step).
 
 # %%
 show_mission(d1, "nitrogen", "#ff5ecb")
@@ -464,9 +494,14 @@ show_p80(d1)
 
 # %% [markdown]
 # ## A7. Method comparison — clustering quality and path covering
-# `water` coverage is identical across methods (it targets *all* vine zones = the
-# same vegetation mask); `nitrogen` differs because each method draws the
-# highest-vigor zone differently.
+# *How computed:* run_pipeline saves each method's feature matrix and labels; here
+# we compute **silhouette / Davies-Bouldin / Calinski-Harabasz** on them,
+# **balance** = smallest/largest zone size, **fragmentation** = connected
+# components per 1000 canopy px, and for path covering **coverage %** = target
+# pixels within the working width of a swath.
+# `water` coverage is the same across methods (target = all vine zones = one
+# vegetation mask); `nitrogen` differs because each method draws the highest-vigor
+# zone differently.
 
 # %%
 method_comparison("data")
@@ -546,32 +581,3 @@ method_comparison("data2")
 # %%
 show_missions_by_method("data2", "nitrogen")
 
-# %% [markdown]
-# ## Why this map differs from `06_standalone_final_results` (the reference)
-# That reference notebook renders a **different pipeline on different data**, so the
-# maps are not comparable:
-# * it is the **Side-wise P80 CPP** planner (colleague's), which works on **GeoJSON
-#   polygons** (safe-area, P80 demand regions) from an **OpenDroneMap** run in
-#   **EPSG:32629**, plotted in real Easting/Northing metres;
-# * coverage there is restricted to **P80 demand regions** (top-20% priority per
-#   road-separated side), not to clustering vigor zones;
-# * here we instead plan on the **clustering management zones** (this project's
-#   contribution), over the raster preview grid.
-#
-# Same goal (UAV-informed ground-robot coverage), two different methods and inputs.
-
-# %% [markdown]
-# ---
-# # Methodology notes
-# * **run_pipeline.py** is the end-to-end run; the colleague's original
-#   `pipeline.py` is kept untouched. All reporting code is in this notebook.
-# * **Representative training** on the full decimated vegetation distribution
-#   (a sparse spatial sample collapses K=3 into an empty high-vigor zone).
-# * **Contiguous zones** from clustering a spatially smoothed vigor surface, with
-#   soil left drivable.
-# * **CaSP is a no-op** on this data (largest patch < its 5000-px threshold);
-#   the smoothing above replaces it.
-# * **Slope from a smoothed DEM** — a per-pixel gradient on a centimetre DEM is
-#   pure noise; a ~2 m baseline recovers the true gentle terrain (median ~3°).
-# * **Path planning** keeps the robot on bare-soil corridors next to the zones
-#   that need treatment, and can route transitions with a slope-aware A\*.

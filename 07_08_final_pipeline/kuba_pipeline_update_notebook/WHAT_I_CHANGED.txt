@@ -21,7 +21,9 @@ broken, no Windows venv script. What I changed:
   trained on the full vegetation; and CaSP was a no-op here (its 5000-px threshold
   is bigger than any patch) -> replaced by smoothing before clustering, giving big
   contiguous zones instead of per-pixel confetti (soil stays drivable).
-- Pixel size: data is in degrees (EPSG:4326), so I compute it geodesically.
+- Pixel size: the "data" set is in degrees (EPSG:4326), so its pixel size / slope
+  were wrong; I compute it geodesically for geographic CRSs. ("data2" is already
+  in metres, EPSG:32629, so it uses the transform directly.)
 - Windows: run.py / run.bat make the venv, install deps and run, on any OS
   (--high-resolution and --use-elevation both work).
 
