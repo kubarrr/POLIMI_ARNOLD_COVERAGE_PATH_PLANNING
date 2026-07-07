@@ -1,0 +1,21 @@
+{
+  "inputs": {
+    "safe_area": "data/cpp_ready/geometry/safe_area.geojson",
+    "priority_layer": "data/experiment_d/priority_layer.tif",
+    "vegetation_body": "outputs/evaluation/vegetation_body_mask.geojson",
+    "row_orientation": "outputs/evaluation/row_orientation.json",
+    "risk_map": "data/processed/risk_maps/traversability_risk.tif"
+  },
+  "outputs": {
+    "mission_dir": "outputs/final_mission_two_side_sidewise_p80_cpp",
+    "evaluation_dir": "outputs/evaluation",
+    "figure_dir": "outputs/figures",
+    "sidewise_p80_geojson": "outputs/evaluation/target_regions_sidewise_P80.geojson",
+    "sidewise_p80_stats_csv": "outputs/evaluation/target_regions_sidewise_P80_stats.csv"
+  },
+  "parameters": {
+    "side_percentile": 80.0,
+    "working_width_m": 1.2,
+    "demand_connector_tolerance_m": 0.0
+  }
+}

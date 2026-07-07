@@ -1,0 +1,7 @@
+../../data/CROPPED_ORTHOMOSAIC_240618_NIR.tif
+../../data/CROPPED_ORTHOMOSAIC_240618_RE.tif
+../../data/CROPPED_ORTHOMOSAIC_240618_R.tif
+../../data/CROPPED_ORTHOMOSAIC_240618_G.tif
+../../data/CROPPED_ORTHOMOSAIC_240618_NDVI.tif
+../../data/CROPPED_DEM_240618.tif
+../../data/vineyard_shape.shp

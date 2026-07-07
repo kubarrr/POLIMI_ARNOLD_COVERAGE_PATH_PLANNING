@@ -19,10 +19,10 @@ __pycache__/
 07_08_pipeline_combined/temp_*.dat
 
 # --- Regenerable report artifacts (the executed .ipynb is committed instead) ---
-07_08_pipeline_combined/cache/
-07_08_pipeline_combined/compare/
-07_08_pipeline_combined/figures/
-07_08_pipeline_combined/paths_data2.txt
+**/cache/
+**/compare/
+**/figures/
+**/paths_data2.txt
 data2/derived/
 
 # --- OS / editor cruft ---
