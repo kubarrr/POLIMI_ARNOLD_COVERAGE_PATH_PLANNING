@@ -47,7 +47,7 @@ from sklearn.metrics import pairwise_distances_argmin_min
 
 from utils import load_paths_from_txt, get_smallest_dimensions
 from processing import sort_labels_by_ndre
-from mission_planner import generate_autonomous_mission
+from mission_planner import generate_autonomous_mission, p80_target_mask
 
 warnings.filterwarnings("ignore")
 
@@ -229,13 +229,23 @@ def main():
     dem_preview = align_dem(path_dem, paths[0], feat["oh"], feat["ow"], preview_map.shape, step)
     if args.use_elevation and dem_preview is None:
         print("      --use-elevation requested but no DEM -> simple transitions used")
+    px = feat["pixel_size_m"]
     for supp in ("water", "nitrogen"):
         traj = generate_autonomous_mission(
             preview_map, supp, spacing_px=4.0,
             use_elevation=args.use_elevation and dem_preview is not None,
-            dem=dem_preview, pixel_size_m=feat["pixel_size_m"])
+            dem=dem_preview, pixel_size_m=px)
         np.save(os.path.join(cache, f"mission_{supp}.npy"), traj_to_array(traj))
         print(f"      {supp:9s} mission: {len(traj)} segments")
+
+    # P80 demand mission (colleague's Side-wise P80 idea applied on our raster:
+    # target = top-20% highest-vigor canopy by NDRE)
+    p80 = p80_target_mask(preview_map, feat["ndre"], percentile=80.0)
+    traj = generate_autonomous_mission(preview_map, "water", spacing_px=4.0,
+                                       use_elevation=False, pixel_size_m=px, target=p80)
+    np.save(os.path.join(cache, "mission_p80.npy"), traj_to_array(traj))
+    np.save(os.path.join(cache, "p80_mask.npy"), p80)
+    print(f"      p80       mission: {len(traj)} segments (top-20% NDRE)")
 
     # --- 4. persist everything the notebook needs ---
     print(f"[4/4] Saving outputs ...")

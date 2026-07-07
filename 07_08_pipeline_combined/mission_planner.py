@@ -33,6 +33,20 @@ def target_mask(preview_map, suplement):
     return preview_map >= 1
 
 
+def p80_target_mask(preview_map, vigor, percentile=80.0):
+    """
+    P80 demand rule (the reference pipeline's idea): the top (100-percentile)%
+    highest-vigor canopy pixels. `vigor` is a per-pixel priority layer such as
+    NDRE. Here the threshold is global; the reference computes it per
+    road-separated side.
+    """
+    veg = preview_map > 0
+    if not np.any(veg):
+        return np.zeros_like(veg)
+    thr = np.percentile(vigor[veg], percentile)
+    return veg & (vigor >= thr)
+
+
 # =====================================================================
 #  Cost grid for the A* planner  (now slope/DEM aware)
 # =====================================================================
@@ -190,7 +204,7 @@ def _sweep_segments(mask, spacing_px, min_len=3):
 
 
 def generate_zone_swaths(preview_map, suplement="water", spacing_px=4.0,
-                         corridor_reach_px=8):
+                         corridor_reach_px=8, target=None):
     """
     Generate coverage swaths for the mission.
 
@@ -215,7 +229,10 @@ def generate_zone_swaths(preview_map, suplement="water", spacing_px=4.0,
 
     fm = field_mask(preview_map)
     walkable = fm & (preview_map == 0)
-    target = target_mask(preview_map, suplement)
+    # `target` may be supplied explicitly (e.g. a P80 top-20% demand mask);
+    # otherwise it is derived from the supplement rule.
+    if target is None:
+        target = target_mask(preview_map, suplement)
     if not np.any(target):
         return []
 
@@ -298,7 +315,8 @@ def build_complete_mission_path(preview_map, swaths_ordered, suplement='water',
 
 
 def generate_autonomous_mission(preview_map, suplement, spacing_px,
-                                use_elevation, dem=None, pixel_size_m=1.0):
+                                use_elevation, dem=None, pixel_size_m=1.0,
+                                target=None):
     """
     Full mission planner.
 
@@ -308,12 +326,15 @@ def generate_autonomous_mission(preview_map, suplement, spacing_px,
     Elevation mode (use_elevation=True): the same swaths, but transitions are
     routed with A* over a DEM-aware cost grid so steep slopes are avoided.
 
+    `target` optionally overrides which pixels must be treated (e.g. a P80
+    top-20% demand mask); otherwise the supplement rule decides.
+
     (The previous auto-rotation step relied on a row-angle detector that did
     not work reliably on this low-resolution data, so it has been removed in
     favour of this simpler, robust pipeline.)
     """
     raw_swaths = generate_zone_swaths(preview_map, suplement=suplement,
-                                      spacing_px=spacing_px)
+                                      spacing_px=spacing_px, target=target)
     if not raw_swaths:
         return []
 
