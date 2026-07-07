@@ -224,6 +224,32 @@ def show_old_vs_final(ds):
     fig.savefig(f"{FIG}/{ds['name']}_old_vs_final.png", bbox_inches="tight"); plt.show()
 
 
+def show_astar_mission(ds, supp="nitrogen", color="#00e5ff"):
+    """Full-field slope-aware A* mission (same A* as the reference: it routes the
+    transitions between swaths). Left = whole field; right = zoom on the routing."""
+    if ds["dem"] is None:
+        return
+    z, base, px = ds["zones"], ds["base"], ds["px"]
+    traj = generate_autonomous_mission(z, supp, 4.0, use_elevation=True,
+                                       dem=ds["dem"], pixel_size_m=px)
+    ys, xs = np.where(z > 0)
+    cy, cx, W = int(ys.mean()), int(xs.mean()), 300
+    fig, ax = plt.subplots(1, 2, figsize=(18, 8), constrained_layout=True)
+    ax[0].imshow(base * 0.4 + 0.05); zone_overlay(ax[0], ds, 0.3)
+    for (x1, y1), (x2, y2) in traj:
+        ax[0].plot([x1, x2], [y1, y2], color=color, lw=0.4, alpha=0.85)
+    ax[0].set_title(f"Full-field slope-aware A* mission — {supp.upper()} — {ds['name']}")
+    ax[1].imshow(base)
+    for (x1, y1), (x2, y2) in traj:
+        ax[1].plot([x1, x2], [y1, y2], color=color, lw=1.3, alpha=0.9)
+    ax[1].set_xlim(max(0, cx - W), cx + W); ax[1].set_ylim(cy + W, max(0, cy - W))
+    ax[1].set_title("Zoom — A* routes transitions through the soil corridors")
+    for a in ax: a.axis("off")
+    fig.savefig(f"{FIG}/{ds['name']}_{supp}_astar.png", bbox_inches="tight"); plt.show()
+    length = sum(np.hypot(x2 - x1, y2 - y1) for (x1, y1), (x2, y2) in traj) * px
+    print(f"A* {supp}: {len(traj)} segments, driven length ~= {length:.0f} m")
+
+
 def show_missions_by_method(name, supp="nitrogen", color="#ff5ecb"):
     """Final coverage path for `supp` under every clustering method."""
     base = np.load(f"{CACHE}/{name}/false_colour.npy")
@@ -312,6 +338,17 @@ show_mission(d1, "water", "#00e5ff")
 
 # %%
 show_mission(d1, "nitrogen", "#ff5ecb")
+
+# %% [markdown]
+# ## A6b. Slope-aware A\* mission (full field)
+# With `--use-elevation`, the transitions between swaths are routed with A\* over a
+# DEM-aware cost grid (soil = cheap, vines = obstacle, steep slopes = blocked) —
+# the same role A\* plays in the reference pipeline, here run over the whole field.
+# The zoom shows the route weaving through the soil corridors instead of cutting
+# straight across the vines.
+
+# %%
+show_astar_mission(d1, "nitrogen")
 
 # %% [markdown]
 # ## A7. Method comparison — clustering quality and path covering
