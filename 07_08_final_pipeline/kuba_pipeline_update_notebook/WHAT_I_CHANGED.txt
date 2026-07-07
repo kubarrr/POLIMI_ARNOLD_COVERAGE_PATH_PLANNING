@@ -1,0 +1,84 @@
+Hi team,
+
+here's a rundown of what was there from Ana and what I changed / added. I kept
+Ana's original pipeline.py exactly as it was (it's in ana_pipeline_preparation/),
+and put my end-to-end version in run_pipeline.py so nothing of hers got lost.
+
+WHERE I STARTED (Ana's part)
+----------------------------
+Ana had the clustering side working (6 methods + CaSP) and had written the first
+path-planning layer in mission_planner.py: the two algorithms, the water/nitrogen
+logic (water = all vine zones, nitrogen = skip the highest-vigor zone), and an A*
+for obstacle avoidance. She flagged a few things that didn't work yet: the path
+ran over the vines, the A* was off on the low-res map, the row-angle detection
+didn't work, and there was no Windows venv script. So I started from that.
+
+WHAT I DID ("make it work")
+---------------------------
+1. It runs end-to-end now on the real data, and produces the maps + missions.
+
+2. "Goes over the vineyards" -> fixed. The robot now drives on the bare-soil
+   corridors (zone 0) *next to* the zones that need treatment, instead of on top
+   of the vine rows. Same water/nitrogen logic you wrote, just moved onto the
+   corridors.
+
+3. The A* is a proper full A* now and it does run over the whole field (~25 s).
+   The real problem wasn't the downsampling of the map - it was the slope: a
+   pixel-by-pixel gradient on a centimetre DEM is pure noise (it said the flat
+   vineyard had ~28 deg median slope, 90 deg max). I smooth the DEM over ~2 m
+   first, and then the slope is realistic (~3 deg) and the A* connectors weave
+   through the corridors like they should.
+
+4. The clustering had two issues I had to fix to get good maps:
+   - The empty zone: with the sparse 15k-pixel training sample, K=3 collapsed and
+     the high-vigor zone came out basically empty. Training on the full (decimated)
+     vegetation instead gives 3 real, balanced zones.
+   - Speckle: the zones came out as per-pixel confetti, not real management areas.
+     Turns out CaSP does nothing here (its 5000-px island threshold is bigger than
+     any patch on this fine vineyard, so it just returns the raw map). I replaced
+     it by smoothing the vigor surface before clustering -> big contiguous zones,
+     while the soil stays drivable.
+
+5. The data is in degrees (EPSG:4326), which is why the pixel size / slope were
+   off. I compute the ground pixel size geodesically so it's correct.
+
+6. Windows script: done. run.py (and run.bat) is cross-platform - it makes the
+   venv, installs the requirements and runs the pipeline, on Windows/Linux/Mac.
+   --high-resolution and --use-elevation both work.
+
+NEW STUFF I ADDED
+-----------------
+- run_pipeline.py: the reproducible end-to-end run. You give it flags
+  (--method, --k, --config, --name) and it does clustering -> zones -> water /
+  nitrogen / P80 coverage paths and writes all the outputs. --method all runs
+  every method for the comparison.
+
+- report.ipynb: a notebook that actually runs run_pipeline with the flags and
+  then shows everything - the zones on the orthophoto, per-zone stats (with
+  NDRE/NDVI distributions), the "how clustering feeds the planner" stages, the
+  water/nitrogen/P80 missions, a full-field A* mission, an old-vs-final zones
+  comparison, and a comparison of all clustering methods (quality metrics + path
+  covering + a coverage path per method).
+
+- prepare_odm.py: an adapter so an OpenDroneMap orthophoto (that's the second
+  dataset, data2, no DEM) feeds the exact same pipeline. So it's tested on two
+  fields now.
+
+- Hong's P80 idea: I added it as an extra target mode (not a clustering method) -
+  "treat the top-20% highest-vigor canopy". It gets its own coverage mission next
+  to water and nitrogen. Note: I threshold globally; Hong does it per
+  road-separated side, which needs the safe-area/road polygon we don't have here.
+
+STILL OPEN / COULD BE BETTER
+----------------------------
+- Fuzzy C-Means is skipped: scikit-fuzzy doesn't install on Python 3.13 (handled
+  gracefully, the other 5 methods run). Easy to add back with a pinned version.
+- The coverage path looks jagged because it sweeps horizontally over fragmented
+  corridors. Clean straight rows would need sweeping along the real row angle
+  (that's the row-detection you started - it just needs to work).
+- A few long straight connectors can cut across the field in simple mode; the
+  A* mode routes them properly.
+
+Everything is committed in small, readable commits if you want to see each change.
+
+- Kuba
