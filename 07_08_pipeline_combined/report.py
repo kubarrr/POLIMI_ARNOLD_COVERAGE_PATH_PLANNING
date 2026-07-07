@@ -50,11 +50,23 @@ def run_pipeline(name, config, method="all", k=3):
 
 # %% [markdown]
 # ## Run the pipeline for both datasets
-# (This is the actual `run_pipeline.py` command being executed with flags.)
+# The cell below **actually executes `run_pipeline.py` with flags** (it prints the
+# exact command). The flags are:
+# * `--name`   dataset name (where outputs are written)
+# * `--config` the paths file (bands + DEM + shape)
+# * `--method` clustering method — `all` runs every method for the comparison
+# * `--k`      number of management zones
+#
+# ```
+# python run_pipeline.py --name data  --config paths.txt      --method all --k 3
+# python run_pipeline.py --name data2 --config paths_data2.txt --method all --k 3
+# ```
+# (add `--high-resolution` for sharper zones, or `--use-elevation` for slope-aware A*).
 
 # %%
-run_pipeline("data", "paths.txt", method="all", k=3)
-run_pipeline("data2", "paths_data2.txt", method="all", k=3)
+RUNS = [("data", "paths.txt"), ("data2", "paths_data2.txt")]
+for _name, _cfg in RUNS:
+    run_pipeline(_name, _cfg, method="all", k=3)
 
 
 # %% [markdown]
@@ -76,8 +88,10 @@ def load_ds(name):
     ds["px"] = float(ds["meta"]["pixel_size_m"])
     ds["K"] = int(ds["meta"]["k"])
     ds["method"] = str(ds["meta"]["method"])
-    ds["mission"] = {s: np.load(f"{c}/mission_{s}.npy") for s in ("water", "nitrogen")
+    ds["mission"] = {s: np.load(f"{c}/mission_{s}.npy")
+                     for s in ("water", "nitrogen", "p80")
                      if os.path.exists(f"{c}/mission_{s}.npy")}
+    ds["p80_mask"] = np.load(f"{c}/p80_mask.npy") if os.path.exists(f"{c}/p80_mask.npy") else None
     return ds
 
 
@@ -97,44 +111,78 @@ def zone_overlay(ax, ds, alpha):
 
 
 def show_zones(ds):
-    fig, ax = plt.subplots(1, 2, figsize=(18, 7.5), constrained_layout=True)
-    ax[0].imshow(ds["base"]); ax[0].set_title(f"False-colour orthophoto (NIR-R-G) — {ds['name']}")
-    ax[1].imshow(ds["base"] * 0.4 + 0.05); zone_overlay(ax[1], ds, 0.85)
-    ax[1].set_title(f"Management zones — {ds['method']} (K={ds['K']})")
-    ax[1].legend(handles=zlegend(ds["K"]), loc="upper right", framealpha=0.9, fontsize=9)
+    K = ds["K"]
+    zov = np.ma.masked_where(ds["zones"] == 0, ds["zones"])
+    cmap = ListedColormap([ZONE_COLORS[z] for z in range(1, K + 1)])
+    norm = BoundaryNorm(np.arange(1, K + 2) - 0.5, K)
+    fig, ax = plt.subplots(1, 2, figsize=(20, 8.5), constrained_layout=True)
+    ax[0].imshow(ds["base"]); ax[0].set_title(f"False-colour orthophoto (NIR-R-G) — {ds['name']}", fontsize=13)
+    # Render the zones with solid colours on a dark background so class
+    # boundaries stay sharp (nearest-neighbour, no alpha blending).
+    ax[1].set_facecolor("#0d0d0d")
+    ax[1].imshow(zov, cmap=cmap, norm=norm, interpolation="nearest")
+    ax[1].set_title(f"Management zones — {ds['method']} (K={K})", fontsize=13)
+    ax[1].legend(handles=zlegend(K), loc="upper right", framealpha=0.95, fontsize=10)
     for a in ax: a.axis("off")
-    fig.savefig(f"{FIG}/{ds['name']}_zones.png", bbox_inches="tight"); plt.show()
+    fig.savefig(f"{FIG}/{ds['name']}_zones.png", dpi=130, bbox_inches="tight"); plt.show()
 
 
 def zone_table(ds):
     K, z, ndre, ndvi, px = ds["K"], ds["zones"], ds["ndre"], ds["ndvi"], ds["px"]
     veg = z > 0
-    rows = [{"Zone": zz, "Vigor": VIGOR.get(zz, ""), "Pixels": int((z == zz).sum()),
-             "Area [ha]": (z == zz).sum() * px * px / 1e4,
-             "% vegetation": 100 * (z == zz).sum() / max(1, veg.sum()),
-             "Mean NDRE": float(ndre[z == zz].mean()) if (z == zz).any() else np.nan,
-             "Mean NDVI": float(ndvi[z == zz].mean()) if (z == zz).any() else np.nan}
-            for zz in range(1, K + 1)]
+    rows = []
+    for zz in range(1, K + 1):
+        m = z == zz; n = int(m.sum())
+        rows.append({"Zone": zz, "Vigor": VIGOR.get(zz, ""), "Canopy px": n,
+                     "Canopy area [ha]": n * px * px / 1e4,
+                     "% of vegetation": 100 * n / max(1, veg.sum()),
+                     "NDRE mean": float(ndre[m].mean()), "NDRE std": float(ndre[m].std()),
+                     "NDVI mean": float(ndvi[m].mean()), "NDVI std": float(ndvi[m].std())})
     df = pd.DataFrame(rows).set_index("Zone")
-    display(df.style.format({"Area [ha]": "{:.3f}", "% vegetation": "{:.1f}",
-                             "Mean NDRE": "{:.3f}", "Mean NDVI": "{:.3f}", "Pixels": "{:,}"})
-            .set_caption(f"Per-zone statistics — {ds['name']} "
-                         f"(total vegetation {veg.sum()*px*px/1e4:.2f} ha)"))
+    display(df.style.format({"Canopy area [ha]": "{:.3f}", "% of vegetation": "{:.1f}",
+                             "NDRE mean": "{:.3f}", "NDRE std": "{:.3f}",
+                             "NDVI mean": "{:.3f}", "NDVI std": "{:.3f}", "Canopy px": "{:,}"})
+            .set_caption(
+        f"Per-zone statistics — {ds['name']}. "
+        f"Area = canopy pixels x pixel_size^2 (pixel = {px:.3f} m). "
+        f"Total canopy {veg.sum()*px*px/1e4:.2f} ha of a {z.size*px*px/1e4:.2f} ha frame "
+        f"(only NDRE>0.1 canopy pixels are counted, not the inter-row soil). "
+        f"'% of vegetation' = zone canopy px / all canopy px."))
+
+
+def show_zone_distributions(ds):
+    """Distribution of NDRE and NDVI within each management zone (mean+-std hidden
+    in the boxes)."""
+    K, z, ndre, ndvi = ds["K"], ds["zones"], ds["ndre"], ds["ndvi"]
+    fig, ax = plt.subplots(1, 2, figsize=(15, 5.5), constrained_layout=True)
+    for j, (arr, nm) in enumerate([(ndre, "NDRE"), (ndvi, "NDVI")]):
+        data = [arr[z == zz] for zz in range(1, K + 1)]
+        bp = ax[j].boxplot(data, patch_artist=True, showfliers=False,
+                           medianprops=dict(color="black"))
+        for patch, zz in zip(bp["boxes"], range(1, K + 1)):
+            patch.set_facecolor(ZONE_COLORS[zz])
+        ax[j].set_xticklabels([f"Zone {zz}\n{VIGOR.get(zz,'')}" for zz in range(1, K + 1)])
+        ax[j].set_ylabel(nm); ax[j].grid(axis="y", alpha=0.3)
+        ax[j].set_title(f"{nm} distribution per zone — {ds['name']}")
+    fig.savefig(f"{FIG}/{ds['name']}_distributions.png", bbox_inches="tight"); plt.show()
 
 
 def show_mission(ds, supp, color):
     if supp not in ds["mission"]:
         return
     traj = ds["mission"][supp]
-    fig, ax = plt.subplots(figsize=(12, 9))
-    ax.imshow(ds["base"] * 0.4 + 0.05); zone_overlay(ax, ds, 0.35)
+    fig, ax = plt.subplots(figsize=(13, 10))
+    # Dimmed orthophoto as context; the path is drawn on top without a zone overlay.
+    ax.imshow(ds["base"] * 0.6)
     for (x1, y1), (x2, y2) in traj:
-        ax.plot([x1, x2], [y1, y2], color=color, lw=1.1, alpha=0.9, zorder=5)
+        ax.plot([x1, x2], [y1, y2], color=color, lw=1.0, alpha=0.95, zorder=5)
     length = sum(np.hypot(x2 - x1, y2 - y1) for (x1, y1), (x2, y2) in traj) * ds["px"]
-    ax.legend(handles=zlegend(ds["K"], "Robot path", color), loc="upper right", framealpha=0.9, fontsize=9)
-    ax.set_title(f"Coverage path — {supp.upper()} — {ds['name']}")
+    ax.legend(handles=[Line2D([0], [0], color=color, lw=2, label=f"Robot path ({supp})")],
+              loc="upper right", framealpha=0.95, fontsize=10)
+    ax.set_title(f"Coverage path — {supp.upper()} — {ds['name']} "
+                 f"({len(traj)} segments, ~{length:.0f} m)", fontsize=13)
     ax.axis("off")
-    fig.savefig(f"{FIG}/{ds['name']}_{supp}.png", bbox_inches="tight"); plt.show()
+    fig.savefig(f"{FIG}/{ds['name']}_{supp}.png", dpi=130, bbox_inches="tight"); plt.show()
     print(f"{supp.upper()}: {len(traj)} segments, driven length ~= {length:.0f} m")
 
 
@@ -143,17 +191,23 @@ def show_stages(ds):
     fm = field_mask(z); tgt = target_mask(z, "water"); walk = fm & (z == 0)
     useful = walk & binary_dilation(tgt, iterations=8)
     sw = order_swaths_snake(_sweep_segments(useful, 4.0))
-    cmap = ListedColormap(ZONE_COLORS[:K + 1]); norm = BoundaryNorm(np.arange(K + 2) - 0.5, K + 1)
-    fig, ax = plt.subplots(2, 2, figsize=(15, 11), constrained_layout=True)
-    ax[0, 0].imshow(z, cmap=cmap, norm=norm); ax[0, 0].set_title("1. Management zones")
-    ax[0, 1].imshow(tgt, cmap="Greens"); ax[0, 1].set_title("2. Target mask (WATER = all vine zones)")
-    ax[1, 0].imshow(useful, cmap="Oranges"); ax[1, 0].set_title("3. Drivable corridors near targets")
-    ax[1, 1].imshow(base * 0.4 + 0.05)
+    zov = np.ma.masked_where(z == 0, z)
+    cmap = ListedColormap([ZONE_COLORS[i] for i in range(1, K + 1)])
+    norm = BoundaryNorm(np.arange(1, K + 2) - 0.5, K)
+    fig, ax = plt.subplots(2, 2, figsize=(18, 14), constrained_layout=True)
+    ax[0, 0].set_facecolor("#0d0d0d")
+    ax[0, 0].imshow(zov, cmap=cmap, norm=norm, interpolation="nearest")
+    ax[0, 0].set_title("1. Management zones (clustering output)", fontsize=14)
+    ax[0, 1].imshow(tgt, cmap="Greens", interpolation="nearest")
+    ax[0, 1].set_title("2. Target mask — vine zones needing WATER (all of them)", fontsize=14)
+    ax[1, 0].imshow(useful, cmap="Oranges", interpolation="nearest")
+    ax[1, 0].set_title("3. Drivable bare-soil corridors adjacent to the targets", fontsize=14)
+    ax[1, 1].imshow(base * 0.6)
     for (x1, y1), (x2, y2) in sw:
-        ax[1, 1].plot([x1, x2], [y1, y2], color="#00e5ff", lw=1.0, alpha=0.9)
-    ax[1, 1].set_title("4. Coverage swaths on corridors")
+        ax[1, 1].plot([x1, x2], [y1, y2], color="#00e5ff", lw=1.0, alpha=0.95)
+    ax[1, 1].set_title("4. Boustrophedon coverage swaths laid on the corridors", fontsize=14)
     for a in ax.ravel(): a.axis("off")
-    fig.savefig(f"{FIG}/{ds['name']}_stages.png", bbox_inches="tight"); plt.show()
+    fig.savefig(f"{FIG}/{ds['name']}_stages.png", dpi=120, bbox_inches="tight"); plt.show()
 
 
 def _fragmentation(zmap, K):
@@ -193,9 +247,10 @@ def method_comparison(name):
             pth.append({"Method": m, "Supplement": supp, "Swaths": nsw,
                         "Length [m]": length, "Coverage [%]": cov})
     clu = pd.DataFrame(clu).set_index("Method"); pth = pd.DataFrame(pth).set_index(["Method", "Supplement"])
-    display(clu.style.set_caption(f"Clustering quality by method — {name}")
-            .background_gradient(subset=["Silhouette", "Calinski-Harabasz"], cmap="Greens")
-            .background_gradient(subset=["Davies-Bouldin", "Fragmentation"], cmap="Reds"))
+    display(clu.style.set_caption(
+        f"Clustering quality by method — {name} "
+        f"(Silhouette/Calinski-Harabasz: higher is better; "
+        f"Davies-Bouldin/Fragmentation: lower is better)"))
     display(pth.style.set_caption(f"Path-covering metrics by method — {name}"))
     cmap = ListedColormap(ZONE_COLORS[:K + 1]); norm = BoundaryNorm(np.arange(K + 2) - 0.5, K + 1)
     names = list(maps); cols = 3; rows = int(np.ceil(len(names) / cols))
@@ -274,6 +329,32 @@ def show_missions_by_method(name, supp="nitrogen", color="#ff5ecb"):
     fig.savefig(f"{FIG}/{name}_missions_by_method.png", bbox_inches="tight"); plt.show()
 
 
+def show_p80(ds, color="#ffd000"):
+    """
+    P80 demand coverage — the reference (Side-wise P80 CPP) selection rule applied
+    on our raster. The demand region is the top-20% highest-vigor canopy (by NDRE);
+    the same corridor coverage planner then plans a mission for it. Left: the P80
+    demand region. Right: the resulting coverage path.
+    """
+    if "p80" not in ds["mission"] or ds["p80_mask"] is None:
+        return
+    traj, mask = ds["mission"]["p80"], ds["p80_mask"]
+    fig, ax = plt.subplots(1, 2, figsize=(18, 8), constrained_layout=True)
+    ax[0].imshow(ds["base"] * 0.5)
+    ax[0].imshow(np.ma.masked_where(~mask, mask), cmap=ListedColormap(["#ffd000"]),
+                 alpha=0.75, interpolation="nearest")
+    ax[0].set_title(f"P80 demand region — top 20% highest-vigor canopy — {ds['name']}")
+    ax[1].imshow(ds["base"] * 0.6)
+    for (x1, y1), (x2, y2) in traj:
+        ax[1].plot([x1, x2], [y1, y2], color=color, lw=1.0, alpha=0.95)
+    length = sum(np.hypot(x2 - x1, y2 - y1) for (x1, y1), (x2, y2) in traj) * ds["px"]
+    ax[1].set_title(f"P80 coverage path ({len(traj)} segments, ~{length:.0f} m)")
+    for a in ax:
+        a.axis("off")
+    fig.savefig(f"{FIG}/{ds['name']}_p80.png", dpi=120, bbox_inches="tight"); plt.show()
+    print(f"P80: {len(traj)} segments, driven length ~= {length:.0f} m")
+
+
 # %% [markdown]
 # ---
 # # PART A — Dataset `data` (multispectral + DEM)
@@ -304,6 +385,15 @@ show_old_vs_final(d1)
 zone_table(d1)
 
 # %% [markdown]
+# ## A2b. Index distributions within each zone
+# Not just the mean: the full **NDRE / NDVI distribution per zone**. Boxes should
+# step up from Zone 1 to Zone K with limited overlap — that is what makes the zones
+# meaningful management units rather than an arbitrary split.
+
+# %%
+show_zone_distributions(d1)
+
+# %% [markdown]
 # ## A3. Topography and slope (DEM smoothed over ~2 m before the gradient)
 
 # %%
@@ -322,7 +412,19 @@ if d1["dem"] is not None:
 
 # %% [markdown]
 # ## A4. How the clustering feeds the path planner
-# Zones → target zones for the supplement → drivable soil corridors → coverage swaths.
+# The zone map is the **only** thing passed from clustering to path planning. The
+# four panels below show the hand-off, step by step:
+#
+# 1. **Management zones** — the clustering output (0 = soil/inter-row = drivable,
+#    1..K = vine vigor).
+# 2. **Target mask** — the zones that need the supplement. For WATER that is *every*
+#    vine zone; for NITROGEN the highest-vigor zone is dropped.
+# 3. **Drivable corridors** — bare-soil pixels (zone 0) inside the field that lie
+#    next to a target zone. This is where the robot is allowed to drive, so it
+#    stays off the vines.
+# 4. **Coverage swaths** — parallel boustrophedon lines laid on those corridors,
+#    then chained into a route. (With `--use-elevation` the between-swath
+#    transitions are routed by slope-aware A*.)
 
 # %%
 show_stages(d1)
@@ -349,6 +451,16 @@ show_mission(d1, "nitrogen", "#ff5ecb")
 
 # %%
 show_astar_mission(d1, "nitrogen")
+
+# %% [markdown]
+# ## A6c. P80 demand coverage (reference method's selection rule)
+# The reference pipeline (Side-wise P80 CPP) treats only the **top 20% of the
+# priority layer**. Applied here, the demand region is the top-20% highest-vigor
+# canopy by NDRE, and our corridor planner covers it. This is a target-selection
+# rule — like an extra "supplement" — not a clustering method.
+
+# %%
+show_p80(d1)
 
 # %% [markdown]
 # ## A7. Method comparison — clustering quality and path covering
@@ -393,6 +505,12 @@ show_old_vs_final(d2)
 zone_table(d2)
 
 # %% [markdown]
+# ## B2b. Index distributions within each zone
+
+# %%
+show_zone_distributions(d2)
+
+# %% [markdown]
 # ## B3. Clustering → path planning stages
 
 # %%
@@ -411,6 +529,12 @@ show_mission(d2, "water", "#00e5ff")
 show_mission(d2, "nitrogen", "#ff5ecb")
 
 # %% [markdown]
+# ## B5b. P80 demand coverage
+
+# %%
+show_p80(d2)
+
+# %% [markdown]
 # ## B6. Method comparison
 
 # %%
@@ -421,6 +545,20 @@ method_comparison("data2")
 
 # %%
 show_missions_by_method("data2", "nitrogen")
+
+# %% [markdown]
+# ## Why this map differs from `06_standalone_final_results` (the reference)
+# That reference notebook renders a **different pipeline on different data**, so the
+# maps are not comparable:
+# * it is the **Side-wise P80 CPP** planner (colleague's), which works on **GeoJSON
+#   polygons** (safe-area, P80 demand regions) from an **OpenDroneMap** run in
+#   **EPSG:32629**, plotted in real Easting/Northing metres;
+# * coverage there is restricted to **P80 demand regions** (top-20% priority per
+#   road-separated side), not to clustering vigor zones;
+# * here we instead plan on the **clustering management zones** (this project's
+#   contribution), over the raster preview grid.
+#
+# Same goal (UAV-informed ground-robot coverage), two different methods and inputs.
 
 # %% [markdown]
 # ---
